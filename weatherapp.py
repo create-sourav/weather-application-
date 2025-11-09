@@ -1,40 +1,31 @@
 # app.py
 # City Guide • WeatherAPI + Google Gemini (LangChain) • Streamlit
-# ---------------------------------------------------------------
-# Tip: For security, prefer environment variables over hardcoding keys.
 
 import os
 import requests
 import streamlit as st
 from typing import Optional
 
-# ---- Try to import Gemini client (show a friendly hint if missing) ----
+# ------------------------------
+# Gemini availability check
+# ------------------------------
 LLM_AVAILABLE = True
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
 except Exception:
     LLM_AVAILABLE = False
 
-# ==============================
-# 🔐 API KEYS (env first, then fallback)
-# ==============================
-GOOGLE_API_KEY = os.getenv(
-    "GOOGLE_API_KEY",
-    "AIzaSyCkQK0NZDlkzg6lw5YzuG-zE9DWt01LSXQ"  # <-- your fallback (use env in real projects)
+# ------------------------------
+# Page setup + CSS
+# ------------------------------
+st.set_page_config(
+    page_title="Gemini Weather + Travel Guide",
+    page_icon="🌤️",
+    layout="wide"
 )
-WEATHERAPI_KEY = os.getenv(
-    "WEATHERAPI_KEY",
-    "ff6fc5ce6e2c46e39ff124013251308"          # <-- your fallback (use env in real projects)
-)
-
-# ==============================
-# 🎨 Page & CSS
-# ==============================
-st.set_page_config(page_title="Gemini Weather + Travel Guide", page_icon="🌤️", layout="wide")
 
 st.markdown("""
 <style>
-/* gradient header bar */
 .header {
   background: linear-gradient(90deg, #4f46e5, #06b6d4);
   padding: 22px 26px; border-radius: 18px; color: white; margin-bottom: 18px;
@@ -43,23 +34,21 @@ st.markdown("""
 .header h1 {margin: 0; font-weight: 800; letter-spacing: .3px;}
 .header p {margin: 6px 0 0; opacity: .9}
 
-/* stat cards */
 .card {
   border-radius: 18px; padding: 18px; background: #ffffff;
   border: 1px solid #eef2ff;
   box-shadow: 0 6px 20px rgba(79,70,229,.08);
 }
+
 .badge {
   display:inline-block; padding: 4px 10px; border-radius: 999px;
   background:#eef2ff; color:#4f46e5; font-size: 12px; font-weight:600;
 }
 
-/* nicer buttons */
 .stButton>button {
   border-radius: 12px; padding: 10px 16px; font-weight: 700;
 }
 
-/* code/json panel */
 .block-container {padding-top: 1.2rem;}
 </style>
 """, unsafe_allow_html=True)
@@ -71,9 +60,9 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ==============================
-# ⚙️ Helpers
-# ==============================
+# ------------------------------
+# Helpers
+# ------------------------------
 @st.cache_data(show_spinner=False, ttl=300)
 def fetch_weather(city: str, api_key: str) -> Optional[dict]:
     try:
@@ -87,21 +76,23 @@ def fetch_weather(city: str, api_key: str) -> Optional[dict]:
         return {"error": str(e)}
 
 def build_weather_summary(data: dict) -> str:
-    loc = data["location"]; cur = data["current"]; cond = cur["condition"]["text"]
+    loc = data["location"]
+    cur = data["current"]
+    cond = cur["condition"]["text"]
     return (
         f"Location: {loc['name']}, {loc['country']}. "
         f"Condition: {cond}. Temp: {cur['temp_c']}°C (feels {cur['feelslike_c']}°C). "
         f"Wind: {cur['wind_kph']} kph. Humidity: {cur['humidity']}%."
     )
 
-def get_attractions_md(city: str, weather_summary: str) -> str:
+def get_attractions_md(city: str, weather_summary: str, google_key: str) -> str:
     if not LLM_AVAILABLE:
         return "⚠️ Gemini package not installed. Run: `pip install langchain-google-genai`"
 
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         temperature=0.2,
-        google_api_key=GOOGLE_API_KEY,
+        google_api_key=google_key,
     )
     prompt = (
         f"You are a concise local guide.\n"
@@ -117,19 +108,18 @@ def get_attractions_md(city: str, weather_summary: str) -> str:
     except Exception as e:
         return f"⚠️ Gemini call failed: {e}"
 
-# ==============================
-# 🧭 Sidebar
-# ==============================
+# ------------------------------
+# Sidebar — USER MUST ENTER BOTH KEYS
+# ------------------------------
 with st.sidebar:
-    st.subheader("Settings")
-    st.caption("You can override keys below (session-only).")
-    key_g = st.text_input("Google API Key", value=GOOGLE_API_KEY, type="password")
-    key_w = st.text_input("WeatherAPI Key", value=WEATHERAPI_KEY, type="password")
-    st.caption("Tip: prefer environment variables in real apps.")
+    st.subheader("API Keys (Required)")
+    google_key = st.text_input("Google Gemini API Key", value="", type="password")
+    weather_key = st.text_input("WeatherAPI Key", value="", type="password")
+    st.caption("These keys are required. We do not store them anywhere.")
 
-# ==============================
-# 🔎 Inputs
-# ==============================
+# ------------------------------
+# Main UI
+# ------------------------------
 left, mid, right = st.columns([2,1,1])
 with left:
     city = st.text_input("City Name", value="Paris", placeholder="e.g., Tokyo")
@@ -140,23 +130,30 @@ with mid:
 with right:
     go = st.button("✨ Generate Travel Guide", use_container_width=True)
 
-# ==============================
-# 🚀 Action
-# ==============================
+# ------------------------------
+# Action
+# ------------------------------
 if go:
-    GOOGLE_API_KEY = key_g.strip() or GOOGLE_API_KEY
-    WEATHERAPI_KEY = key_w.strip() or WEATHERAPI_KEY
 
-    with st.spinner("Fetching live weather..."):
-        data = fetch_weather(city, WEATHERAPI_KEY)
-
-    if not data or data.get("error"):
-        st.error(f"Could not fetch weather. {data.get('error','Check city or API key.')}")
+    if not google_key.strip():
+        st.error("Please enter your Google Gemini API key.")
         st.stop()
 
-    cur = data["current"]; loc = data["location"]
+    if not weather_key.strip():
+        st.error("Please enter your WeatherAPI key.")
+        st.stop()
 
-    # --- Top Weather Card ---
+    with st.spinner("Fetching live weather..."):
+        data = fetch_weather(city, weather_key)
+
+    if not data or data.get("error"):
+        st.error(f"Could not fetch weather. {data.get('error', 'Check city or API key.')}")
+        st.stop()
+
+    cur = data["current"]
+    loc = data["location"]
+
+    # Weather Card
     st.markdown(f"""
     <div class="card">
       <div style="display:flex; gap:18px; align-items:center;">
@@ -170,31 +167,31 @@ if go:
     </div>
     """, unsafe_allow_html=True)
 
-    # --- Stat row ---
+    # Metrics
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Temperature", f"{cur['temp_c']:.1f} °C", f"Feels {cur['feelslike_c']:.1f}")
     c2.metric("Humidity", f"{cur['humidity']} %")
     c3.metric("Wind", f"{cur['wind_kph']} kph")
     c4.metric("Pressure", f"{cur.get('pressure_mb', '—')} mb")
 
-    # --- Tabs ---
     tab_weather, tab_attractions, tab_map, tab_json = st.tabs(
         ["🌦️ Weather details", "🏛️ Top attractions", "🗺️ Map", "🧾 Raw JSON"]
     )
 
     with tab_weather:
-        st.write(f"**Cloud**: {cur.get('cloud', '—')}%  |  **UV**: {cur.get('uv', '—')}  |  "
-                 f"**Visibility**: {cur.get('vis_km', '—')} km  |  **Wind dir**: {cur.get('wind_dir','—')}")
+        st.write(f"**Cloud**: {cur.get('cloud', '—')}%  |  "
+                 f"**UV**: {cur.get('uv', '—')}  |  "
+                 f"**Visibility**: {cur.get('vis_km', '—')} km  |  "
+                 f"**Wind dir**: {cur.get('wind_dir','—')}")
         st.progress(min(100, int(cur.get('humidity', 0))), text="Humidity")
 
     with tab_attractions:
         with st.spinner("Asking Gemini for an up-to-date list…"):
             weather_summary = build_weather_summary(data)
-            md = get_attractions_md(city, weather_summary)
+            md = get_attractions_md(city, weather_summary, google_key)
         st.markdown(md)
 
     with tab_map:
-        # Simple map using location lat/long
         st.caption("Approximate city location")
         st.map({"lat": [loc["lat"]], "lon": [loc["lon"]]}, zoom=10)
 
@@ -204,6 +201,6 @@ if go:
     st.success("Done! Try another city.")
 
 else:
-    st.info("Enter a city and click **Generate Travel Guide**.")
+    st.info("Enter a city, add your API keys, then click **Generate Travel Guide**.")
 
 st.caption("Built with Streamlit • Google Gemini • WeatherAPI")
